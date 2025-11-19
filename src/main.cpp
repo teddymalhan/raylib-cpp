@@ -44,6 +44,7 @@ namespace {
         // Disable cursor for first-person camera
         DisableCursor();
         
+        #pragma unroll
         while (!WindowShouldClose()) {
             // Handle keyboard input for scene switching
             if (IsKeyPressed(kKeySwitchScene)) {

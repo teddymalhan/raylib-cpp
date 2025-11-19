@@ -51,6 +51,7 @@ private:
     void setupPhysicsWorld();
     void createGroundPlane();
     void createFallingBoxes();
+    void createCharacter();
     void cleanupPhysicsWorld();
     
     /// Helper to create a physics entity with all necessary components

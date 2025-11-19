@@ -32,24 +32,14 @@ void SceneManager::switchToNextScene() {
         return;
     }
     
-    // Ensure currentSceneIndex is valid
-    if (currentSceneIndex >= scenes.size()) {
-        std::cerr << "Error: currentSceneIndex (" << currentSceneIndex 
-                  << ") is out of bounds. Resetting to 0.\n";
-        currentSceneIndex = 0;
-    }
-    
     // Calculate next index with proper wrapping
     // When at the last scene (index scenes.size() - 1), this should wrap to 0
     const size_t nextIndex = (currentSceneIndex + 1) % scenes.size();
     
-    // Double-check the calculation is correct (should never happen with modulo, but be safe)
-    if (nextIndex >= scenes.size()) {
-        std::cerr << "Error: Calculated nextIndex (" << nextIndex 
-                  << ") is out of bounds. Forcing to 0.\n";
-        activateScene(0);
-        return;
-    }
+    // Debug output (can be removed later)
+    std::cout << "Switching from scene " << currentSceneIndex 
+              << " to scene " << nextIndex 
+              << " (total: " << scenes.size() << ")\n";
     
     activateScene(nextIndex);
 }
@@ -93,70 +83,31 @@ void SceneManager::draw() const {
 
 void SceneManager::activateScene(size_t index) {
     if (index >= scenes.size()) {
-        std::cerr << "Error: Attempted to activate scene " << index 
-                  << " but only " << scenes.size() << " scenes exist\n";
         return;
     }
     
-    // If switching to the same scene, do nothing
-    if (index == currentSceneIndex) {
-        return;
-    }
-    
-    // Store the old index before updating
-    const size_t oldIndex = currentSceneIndex;
-    
-    // Cleanup the current scene if it exists and is different from target
-    // This must complete successfully before we switch to the new scene
-    if (oldIndex < scenes.size() && scenes[oldIndex]) {
+    // Only cleanup if we have a valid current scene and it's different from the target
+    if (currentSceneIndex < scenes.size() && 
+        currentSceneIndex != index && 
+        scenes[currentSceneIndex]) {
         try {
-            scenes[oldIndex]->cleanup();
-        } catch (const std::exception& e) {
-            std::cerr << "Error: Exception during scene cleanup: " << e.what() << '\n';
-            // Don't proceed if cleanup fails - this could leave us in a bad state
-            return;
+            scenes[currentSceneIndex]->cleanup();
         } catch (...) {
-            std::cerr << "Error: Unknown exception during scene cleanup\n";
-            return;
+            // If cleanup throws, continue anyway to prevent crash
+            // This can happen if Bullet Physics cleanup fails
         }
     }
     
-    // Update index AFTER cleanup completes successfully
+    // Update index
     currentSceneIndex = index;
     
-    // Initialize the new scene
-    // Scenes should handle being initialized multiple times (they check isInitialized)
+    // Initialize new scene
     if (scenes[currentSceneIndex]) {
         try {
             scenes[currentSceneIndex]->initialize();
-        } catch (const std::exception& e) {
-            std::cerr << "Error: Exception during scene initialization: " << e.what() << '\n';
-            // If initialization fails, we're in a bad state
-            // Reset to a safe state (first scene if available)
-            if (!scenes.empty()) {
-                currentSceneIndex = 0;
-                if (scenes[0]) {
-                    try {
-                        scenes[0]->initialize();
-                    } catch (...) {
-                        // If even this fails, we're really in trouble
-                        std::cerr << "Fatal: Cannot initialize any scene\n";
-                    }
-                }
-            }
         } catch (...) {
-            std::cerr << "Error: Unknown exception during scene initialization\n";
-            // Same recovery as above
-            if (!scenes.empty()) {
-                currentSceneIndex = 0;
-                if (scenes[0]) {
-                    try {
-                        scenes[0]->initialize();
-                    } catch (...) {
-                        std::cerr << "Fatal: Cannot initialize any scene\n";
-                    }
-                }
-            }
+            // If initialization throws, log but continue
+            // The scene will just be in an uninitialized state
         }
     }
 }

@@ -19,6 +19,7 @@ void BulletPhysicsScene::initialize() {
     setupPhysicsWorld();
     createGroundPlane();
     createFallingBoxes();
+    createCharacter();
     
     isInitialized = true;
 }
@@ -161,6 +162,56 @@ void BulletPhysicsScene::createFallingBoxes() {
             ++boxIndex;
         }
     }
+}
+
+void BulletPhysicsScene::createCharacter() {
+    constexpr const char* kCharacterPath = "assets/characters/character-a.glb";
+    constexpr float kCharacterMass = 1.0F;
+    constexpr float kCharacterStartHeight = 3.0F;
+    
+    // Check if model file exists
+    if (!FileExists(kCharacterPath)) {
+        return;  // Silently skip if file doesn't exist
+    }
+    
+    // Load the character model
+    Model characterModel = LoadModel(kCharacterPath);
+    const bool hasCharacterModel = IsModelValid(characterModel);
+    
+    if (!hasCharacterModel) {
+        return;  // Silently skip if model failed to load
+    }
+    
+    // Get bounding box to determine collision shape size
+    const BoundingBox boundingBox = GetModelBoundingBox(characterModel);
+    const Vector3 boundingSize = Vector3Subtract(boundingBox.max, boundingBox.min);
+    
+    // Calculate capsule dimensions from bounding box
+    // Use the average of width and depth for radius, and height for capsule height
+    const float capsuleRadius = std::max(boundingSize.x, boundingSize.z) * 0.5F;
+    const float capsuleHeight = std::max(boundingSize.y - (capsuleRadius * 2.0F), 0.1F);
+    
+    // Create capsule collision shape (better for characters than boxes)
+    // btCapsuleShape is Y-axis aligned by default (upright for characters)
+    btCollisionShape* capsuleShape = new btCapsuleShape(
+        static_cast<btScalar>(capsuleRadius),
+        static_cast<btScalar>(capsuleHeight)
+    );
+    
+    // Create character entity
+    const Vector3 characterPosition{0.0F, kCharacterStartHeight, 0.0F};
+    const auto characterEntity = createPhysicsEntity(
+        characterPosition,
+        capsuleShape,
+        kCharacterMass,
+        hasCharacterModel,
+        characterModel,
+        WHITE,  // Use model's original colors
+        false   // not ground
+    );
+    
+    // Add Name component to identify the character
+    registry.emplace<Name>(characterEntity, "character-a");
 }
 
 entt::entity BulletPhysicsScene::createPhysicsEntity(
