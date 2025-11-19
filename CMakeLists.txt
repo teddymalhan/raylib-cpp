@@ -156,8 +156,56 @@ include(cmake/Doxygen.cmake)
 # Model project dependencies
 #
 
+# Detect Emscripten/Web platform
+if(EMSCRIPTEN)
+  set(PLATFORM_WEB TRUE)
+  message(STATUS "Building for Web/WebAssembly with Emscripten")
+endif()
+
 # Raylib configuration
-if(APPLE)
+if(PLATFORM_WEB)
+  # Web/Emscripten configuration for raylib
+  # Note: raylib must be built separately for Web platform
+  # You need to build raylib with: emcmake cmake -DPLATFORM=Web ...
+  # and place the built libraylib.a in lib/web/
+  
+  # Try to find raylib built for Web
+  if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/lib/web/libraylib.a)
+    target_include_directories(
+      ${PROJECT_NAME}
+      PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/lib
+    )
+    
+    target_link_libraries(
+      ${PROJECT_NAME}
+      PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/lib/web/libraylib.a
+    )
+    
+    message(STATUS "Found raylib Web build at: ${CMAKE_CURRENT_SOURCE_DIR}/lib/web/libraylib.a")
+  else()
+    message(WARNING "raylib Web build not found. Please build raylib for Web platform first.")
+    message(WARNING "Expected location: ${CMAKE_CURRENT_SOURCE_DIR}/lib/web/libraylib.a")
+  endif()
+  
+  # Set Emscripten linker flags for raylib
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s USE_GLFW=3 -s ASSERTIONS=1 -s WASM=1 -s ASYNCIFY -s GL_ENABLE_GET_PROC_ADDRESS=1")
+  set(CMAKE_EXECUTABLE_SUFFIX ".html")
+  
+  # Enable file system support for loading assets
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s ALLOW_MEMORY_GROWTH=1")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s EXPORTED_RUNTIME_METHODS=['FS','ccall','cwrap']")
+  
+  # Preload assets directory (if it exists)
+  if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/assets)
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} --preload-file ${CMAKE_CURRENT_SOURCE_DIR}/assets@/assets")
+    message(STATUS "Preloading assets directory for WASM")
+  else()
+    message(WARNING "Assets directory not found. Some features may not work.")
+  endif()
+  
+elseif(APPLE)
   # Add raylib include directory
   target_include_directories(
     ${PROJECT_NAME}
@@ -211,7 +259,21 @@ endif()
 
 if(${PROJECT_NAME}_BUILD_EXECUTABLE AND ${PROJECT_NAME}_ENABLE_UNIT_TESTING)
   # Also link raylib to the library target if unit testing is enabled
-  if(APPLE)
+  if(PLATFORM_WEB)
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/lib/web/libraylib.a)
+      target_include_directories(
+        ${PROJECT_NAME}_LIB
+        PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/lib
+      )
+      
+      target_link_libraries(
+        ${PROJECT_NAME}_LIB
+        PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/lib/web/libraylib.a
+      )
+    endif()
+  elseif(APPLE)
     target_include_directories(
       ${PROJECT_NAME}_LIB
       PRIVATE
@@ -232,7 +294,16 @@ if(${PROJECT_NAME}_BUILD_EXECUTABLE AND ${PROJECT_NAME}_ENABLE_UNIT_TESTING)
 endif()
 
 # Bullet Physics configuration
-if(APPLE)
+if(PLATFORM_WEB)
+  # Use Emscripten's built-in Bullet Physics port
+  # This is automatically available when using Emscripten
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s USE_BULLET=1")
+  
+  # Include paths for Bullet (Emscripten provides these)
+  # The headers are available through Emscripten's system includes
+  message(STATUS "Using Emscripten's built-in Bullet Physics (USE_BULLET=1)")
+  
+elseif(APPLE)
   # Find Bullet Physics via Homebrew
   set(BULLET_ROOT "/opt/homebrew/opt/bullet")
   if(EXISTS ${BULLET_ROOT})
@@ -288,8 +359,91 @@ if(APPLE)
   endif()
 endif()
 
+# Dear ImGui configuration
+include(FetchContent)
+FetchContent_Declare(
+  imgui
+  GIT_REPOSITORY https://github.com/ocornut/imgui.git
+  GIT_TAG v1.90.5
+)
+
+# Only fetch if not already available
+if(NOT imgui_POPULATED)
+  FetchContent_Populate(imgui)
+  
+  # Create ImGui library
+  add_library(imgui STATIC
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/imgui_demo.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+  )
+  
+  target_include_directories(imgui PUBLIC
+    ${imgui_SOURCE_DIR}
+    ${imgui_SOURCE_DIR}/backends
+  )
+  
+  # Set C++ standard
+  target_compile_features(imgui PUBLIC cxx_std_11)
+  
+  # Platform-specific settings
+  if(APPLE)
+    target_compile_definitions(imgui PRIVATE __APPLE__)
+  endif()
+  
+  message(STATUS "ImGui fetched and configured")
+endif()
+
+# Link ImGui to project
+target_link_libraries(${PROJECT_NAME} PRIVATE imgui)
+
+if(${PROJECT_NAME}_BUILD_EXECUTABLE AND ${PROJECT_NAME}_ENABLE_UNIT_TESTING)
+  target_link_libraries(${PROJECT_NAME}_LIB PRIVATE imgui)
+endif()
+
 # EnTT ECS configuration
-if(APPLE)
+if(PLATFORM_WEB)
+  # EnTT is header-only, so we just need to find it
+  # For Web builds, you can either:
+  # 1. Use a header-only version (copy headers to include/)
+  # 2. Use vcpkg with wasm32-emscripten triplet
+  # 3. Include EnTT headers directly
+  
+  # Try to find EnTT in standard locations or as a submodule
+  if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/entt/include/entt/entt.hpp)
+    target_include_directories(
+      ${PROJECT_NAME}
+      PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/third_party/entt/include
+    )
+    message(STATUS "Found EnTT at: ${CMAKE_CURRENT_SOURCE_DIR}/third_party/entt/include")
+  elseif(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/lib/entt/include/entt/entt.hpp)
+    target_include_directories(
+      ${PROJECT_NAME}
+      PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/lib/entt/include
+    )
+    message(STATUS "Found EnTT at: ${CMAKE_CURRENT_SOURCE_DIR}/lib/entt/include")
+  else()
+    # Try to find via pkg-config (may work if installed)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+      pkg_check_modules(ENTT QUIET entt)
+      if(ENTT_FOUND)
+        target_include_directories(${PROJECT_NAME} PRIVATE ${ENTT_INCLUDE_DIRS})
+        message(STATUS "Found EnTT via pkg-config")
+      else()
+        message(WARNING "EnTT not found. Please ensure EnTT headers are available.")
+      endif()
+    else()
+      message(WARNING "EnTT not found. Please ensure EnTT headers are available.")
+    endif()
+  endif()
+  
+elseif(APPLE)
   # Find EnTT via Homebrew
   set(ENTT_ROOT "/opt/homebrew/opt/entt")
   if(EXISTS ${ENTT_ROOT})

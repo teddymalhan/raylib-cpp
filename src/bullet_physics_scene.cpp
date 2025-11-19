@@ -2,6 +2,7 @@
 #include <btBulletDynamicsCommon.h>
 #include <raymath.h>
 #include <cmath>
+#include <iostream>
 
 namespace project {
 
@@ -166,25 +167,40 @@ void BulletPhysicsScene::createFallingBoxes() {
 void BulletPhysicsScene::createCharacter() {
     constexpr const char* kCharacterPath = "assets/characters/character-a.glb";
     constexpr float kCharacterMass = 0.0F;  // Static (doesn't fall)
-    constexpr float kCharacterDistance = 5.0F;  // Distance from origin (camera looks at origin)
-    constexpr float kGroundY = -0.0F;  // Ground plane Y position
+    constexpr float kCharacterDistance = 3.0F;  // Distance from origin (camera looks at origin)
+    constexpr float kGroundY = -0.5F;  // Ground plane Y position (matches createGroundPlane)
+    
+    std::cout << "=== Creating Character ===" << std::endl;
+    std::cout << "Character path: " << kCharacterPath << std::endl;
     
     // Check if model file exists
     if (!FileExists(kCharacterPath)) {
-        return;  // Silently skip if file doesn't exist
+        std::cout << "ERROR: Character model not found at: " << kCharacterPath << std::endl;
+        std::cout << "Current working directory check..." << std::endl;
+        return;
     }
+    
+    std::cout << "Character file exists, loading model..." << std::endl;
     
     // Load the character model
     Model characterModel = LoadModel(kCharacterPath);
     const bool hasCharacterModel = IsModelValid(characterModel);
     
+    std::cout << "Model loaded. IsValid: " << (hasCharacterModel ? "YES" : "NO") << std::endl;
+    std::cout << "Model mesh count: " << characterModel.meshCount << std::endl;
+    std::cout << "Model material count: " << characterModel.materialCount << std::endl;
+    
     if (!hasCharacterModel) {
-        return;  // Silently skip if model failed to load
+        std::cout << "ERROR: Failed to load character model from: " << kCharacterPath << std::endl;
+        return;
     }
     
     // Get bounding box to determine collision shape size
     const BoundingBox boundingBox = GetModelBoundingBox(characterModel);
     const Vector3 boundingSize = Vector3Subtract(boundingBox.max, boundingBox.min);
+    
+    std::cout << "Character model loaded. Bounding box size: (" 
+              << boundingSize.x << ", " << boundingSize.y << ", " << boundingSize.z << ")" << std::endl;
     
     // Calculate capsule dimensions from bounding box
     // Use the average of width and depth for radius, and height for capsule height
@@ -198,12 +214,26 @@ void BulletPhysicsScene::createCharacter() {
         static_cast<btScalar>(capsuleHeight)
     );
     
-    // Position character on the ground, away from camera
-    // Camera is at (2, 1.5, 2) looking at (0, 0, 0)
-    // Place character in front of camera view, on the ground
-    // Ground is at Y = -0.5, so character center should be at ground level + half capsule height
-    const float characterY = kGroundY + (capsuleHeight * 0.5F) + capsuleRadius;
-    const Vector3 characterPosition{0.0F, characterY, -kCharacterDistance};
+    // Position character on the ground
+    // Ground is at Y = -0.5, and the ground plane has a half-extent of 0.5, so the top of the ground is at Y = 0.0
+    // We want the bottom of the character's bounding box to be at the top of the ground (Y = 0.0)
+    // The bounding box min.y is relative to the model's origin, so we need to place the model origin
+    // such that the bottom of the bounding box sits on the ground
+    const float groundTopY = 0.0F;  // Top of ground plane (ground center Y = -0.5, half-extent = 0.5)
+    const float characterBottomOffset = boundingBox.min.y;  // Offset from model origin to bottom of bounding box
+    const float characterY = groundTopY - characterBottomOffset;  // Position so bottom sits on ground
+    const Vector3 characterPosition{0.0F, characterY, 0.0F};  // Place at origin for visibility
+    
+    std::cout << "Ground top Y: " << groundTopY << std::endl;
+    std::cout << "Character bounding box min Y: " << boundingBox.min.y << std::endl;
+    std::cout << "Character Y position calculated: " << characterY << std::endl;
+    
+    std::cout << "Character positioned at: (" << characterPosition.x << ", " 
+              << characterPosition.y << ", " << characterPosition.z << ")" << std::endl;
+    std::cout << "Character bounding box min: (" << boundingBox.min.x << ", " 
+              << boundingBox.min.y << ", " << boundingBox.min.z << ")" << std::endl;
+    std::cout << "Character bounding box max: (" << boundingBox.max.x << ", " 
+              << boundingBox.max.y << ", " << boundingBox.max.z << ")" << std::endl;
     
     const auto characterEntity = createPhysicsEntity(
         characterPosition,
@@ -217,6 +247,20 @@ void BulletPhysicsScene::createCharacter() {
     
     // Add Name component to identify the character
     registry.emplace<Name>(characterEntity, "character-a");
+    
+    // Set a visible scale for the character (GLB models might be very small or large)
+    if (registry.all_of<Transform>(characterEntity)) {
+        auto& transform = registry.get<Transform>(characterEntity);
+        // Try a reasonable scale - adjust if needed
+        const float modelScale = 1.0F / std::max({boundingSize.x, boundingSize.y, boundingSize.z, 1.0F});
+        transform.scale = Vector3{1.0F, 1.0F, 1.0F};  // Start with 1:1 scale
+        std::cout << "Character scale set to: (" << transform.scale.x << ", " 
+                  << transform.scale.y << ", " << transform.scale.z << ")" << std::endl;
+    }
+    
+    // Debug: Print model info
+    std::cout << "Character entity created with " << characterModel.meshCount << " meshes" << std::endl;
+    std::cout << "Character entity created with " << characterModel.materialCount << " materials" << std::endl;
 }
 
 entt::entity BulletPhysicsScene::createPhysicsEntity(
@@ -312,9 +356,72 @@ void BulletPhysicsScene::draw() const {
     // Draw all other renderable entities
     RenderSystem::draw(registry);
     
+    // Draw debug markers and direct rendering for characters
+    auto characterView = registry.view<const Transform, const Renderable, const Name>();
+    size_t characterCount = 0;
+    bool hasCharacters = false;
+    
+    for (auto entity : characterView) {
+        hasCharacters = true;
+        characterCount++;
+        const auto& transform = characterView.get<Transform>(entity);
+        const auto& renderable = characterView.get<Renderable>(entity);
+        
+        // Draw a small debug cube at character position (optional - can be removed)
+        // DrawCube(transform.position, 0.2F, 0.2F, 0.2F, BLUE);
+        
+        if (renderable.hasModel) {
+            // Draw bounding box for character
+            const BoundingBox bbox = GetModelBoundingBox(renderable.model);
+            const Vector3 bboxSize = Vector3Subtract(bbox.max, bbox.min);
+            const Vector3 bboxCenter = Vector3Add(bbox.min, Vector3Scale(bboxSize, 0.5F));
+            const Vector3 worldPos = Vector3Add(transform.position, bboxCenter);
+            
+            // Draw bounding box
+            DrawBoundingBox(BoundingBox{
+                Vector3Subtract(worldPos, Vector3Scale(bboxSize, 0.5F)),
+                Vector3Add(worldPos, Vector3Scale(bboxSize, 0.5F))
+            }, YELLOW);
+            
+            // Draw a small debug sphere at character position (optional - can be removed)
+            // DrawSphere(transform.position, 0.1F, RED);
+            
+            // Draw model with normal scale
+            // Use the transform scale if valid, otherwise use 1.0
+            const Vector3 drawScale = (transform.scale.x > 0.0F && transform.scale.y > 0.0F && transform.scale.z > 0.0F)
+                ? transform.scale
+                : Vector3{1.0F, 1.0F, 1.0F};
+            
+            // Draw the model once with proper scale
+            DrawModelEx(
+                renderable.model,
+                transform.position,
+                Vector3{0.0F, 1.0F, 0.0F},  // Y-axis
+                0.0F,  // No rotation
+                drawScale,
+                WHITE
+            );
+        } else {
+            // Model is invalid - draw a warning marker
+            DrawSphere(transform.position, 0.5F, ORANGE);
+        }
+    }
+    
+    if (!hasCharacters) {
+        // No characters found - draw a test cube at origin to verify rendering works
+        DrawCube(Vector3{0.0F, 0.0F, 0.0F}, 1.0F, 1.0F, 1.0F, MAGENTA);
+        DrawCubeWires(Vector3{0.0F, 0.0F, 0.0F}, 1.0F, 1.0F, 1.0F, RED);
+    }
+    
     // Draw wireframes for physics objects (optional visual aid)
+    // Skip characters (entities with Name component) to avoid obscuring the model
     auto view = registry.view<const Transform, const PhysicsBody>(entt::exclude<Ground>);
     for (auto entity : view) {
+        // Skip entities with Name component (characters)
+        if (registry.all_of<Name>(entity)) {
+            continue;
+        }
+        
         const auto& transform = view.get<Transform>(entity);
         constexpr float kBoxSize = 0.5F;
         DrawCubeWiresV(

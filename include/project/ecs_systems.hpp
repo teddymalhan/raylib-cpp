@@ -80,22 +80,41 @@ public:
             }
             
             // Convert quaternion to axis-angle for DrawModelEx
-            const Vector3 rotationAxis = Vector3Normalize(Vector3{
-                transform.rotation.x,
-                transform.rotation.y,
-                transform.rotation.z
-            });
-            const float rotationAngle = 2.0F * acosf(transform.rotation.w);
+            // Handle identity quaternion (0, 0, 0, 1) case
+            Vector3 rotationAxis{0.0F, 1.0F, 0.0F};  // Default to Y-axis
+            float rotationAngle = 0.0F;
+            
+            const float quatLength = std::sqrt(
+                transform.rotation.x * transform.rotation.x +
+                transform.rotation.y * transform.rotation.y +
+                transform.rotation.z * transform.rotation.z
+            );
+            
+            if (quatLength > 0.0001F) {  // Not identity quaternion
+                rotationAxis = Vector3Normalize(Vector3{
+                    transform.rotation.x,
+                    transform.rotation.y,
+                    transform.rotation.z
+                });
+                rotationAngle = 2.0F * acosf(std::clamp(transform.rotation.w, -1.0F, 1.0F));
+            }
             
             // Draw the model
-            DrawModelEx(
-                renderable.model,
-                transform.position,
-                rotationAxis,
-                rotationAngle,
-                transform.scale,
-                renderable.color
-            );
+            // Use DrawModelEx with proper scale
+            const Vector3 scale = transform.scale;
+            if (scale.x > 0.0F && scale.y > 0.0F && scale.z > 0.0F) {
+                DrawModelEx(
+                    renderable.model,
+                    transform.position,
+                    rotationAxis,
+                    rotationAngle,
+                    scale,
+                    renderable.color
+                );
+            } else {
+                // Fallback to DrawModel if scale is invalid
+                DrawModel(renderable.model, transform.position, 1.0F, renderable.color);
+            }
             
             // Draw wireframe for physics objects (optional visual aid)
             // You can add a component to control this if needed
