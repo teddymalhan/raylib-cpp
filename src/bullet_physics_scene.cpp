@@ -20,6 +20,7 @@ void BulletPhysicsScene::initialize() {
     setupPhysicsWorld();
     createGroundPlane();
     createCharacter();
+    createCar();
     
     isInitialized = true;
 }
@@ -261,6 +262,99 @@ void BulletPhysicsScene::createCharacter() {
     // Debug: Print model info
     std::cout << "Character entity created with " << characterModel.meshCount << " meshes" << std::endl;
     std::cout << "Character entity created with " << characterModel.materialCount << " materials" << std::endl;
+}
+
+void BulletPhysicsScene::createCar() {
+    constexpr const char* kCarPath = "assets/cars/police.glb";
+    constexpr float kCarMass = 1000.0F;  // Car mass in kg (typical sedan)
+    constexpr float kCarDistance = 5.0F;  // Distance from origin
+    
+    std::cout << "=== Creating Car ===" << std::endl;
+    std::cout << "Car path: " << kCarPath << std::endl;
+    
+    // Check if model file exists
+    if (!FileExists(kCarPath)) {
+        std::cout << "ERROR: Car model not found at: " << kCarPath << std::endl;
+        return;
+    }
+    
+    std::cout << "Car file exists, loading model..." << std::endl;
+    
+    // Load the car model
+    Model carModel = LoadModel(kCarPath);
+    const bool hasCarModel = IsModelValid(carModel);
+    
+    std::cout << "Model loaded. IsValid: " << (hasCarModel ? "YES" : "NO") << std::endl;
+    std::cout << "Model mesh count: " << carModel.meshCount << std::endl;
+    std::cout << "Model material count: " << carModel.materialCount << std::endl;
+    
+    if (!hasCarModel) {
+        std::cout << "ERROR: Failed to load car model from: " << kCarPath << std::endl;
+        return;
+    }
+    
+    // Get bounding box to determine collision shape size
+    const BoundingBox boundingBox = GetModelBoundingBox(carModel);
+    const Vector3 boundingSize = Vector3Subtract(boundingBox.max, boundingBox.min);
+    
+    std::cout << "Car model loaded. Bounding box size: (" 
+              << boundingSize.x << ", " << boundingSize.y << ", " << boundingSize.z << ")" << std::endl;
+    
+    // Create box collision shape for the car (appropriate for vehicles)
+    // Use half-extents for btBoxShape
+    const float halfExtentX = std::max(boundingSize.x * 0.5F, 0.5F);
+    const float halfExtentY = std::max(boundingSize.y * 0.5F, 0.3F);
+    const float halfExtentZ = std::max(boundingSize.z * 0.5F, 0.8F);
+    
+    btCollisionShape* boxShape = new btBoxShape(
+        btVector3(
+            static_cast<btScalar>(halfExtentX),
+            static_cast<btScalar>(halfExtentY),
+            static_cast<btScalar>(halfExtentZ)
+        )
+    );
+    
+    // Position car on the ground, offset from origin
+    // Ground is at Y = -0.5, and the ground plane has a half-extent of 0.5, so the top of the ground is at Y = 0.0
+    // We want the bottom of the car's bounding box to be at the top of the ground (Y = 0.0)
+    // The bounding box min.y is relative to the model's origin, so we need to place the model origin
+    // such that the bottom of the bounding box sits on the ground
+    const float groundTopY = 0.0F;  // Top of ground plane (ground center Y = -0.5, half-extent = 0.5)
+    const float carBottomOffset = boundingBox.min.y;  // Offset from model origin to bottom of bounding box
+    const float carY = groundTopY - carBottomOffset;  // Position so bottom sits on ground
+    const Vector3 carPosition{kCarDistance, carY, 0.0F};  // Place in front of camera
+    
+    std::cout << "Ground top Y: " << groundTopY << std::endl;
+    std::cout << "Car bounding box min Y: " << boundingBox.min.y << std::endl;
+    std::cout << "Car Y position calculated: " << carY << std::endl;
+    std::cout << "Car positioned at: (" << carPosition.x << ", " 
+              << carPosition.y << ", " << carPosition.z << ")" << std::endl;
+    
+    // Create car entity
+    const auto carEntity = createPhysicsEntity(
+        carPosition,
+        boxShape,
+        kCarMass,
+        hasCarModel,
+        carModel,
+        WHITE,  // Use model's original colors
+        false   // not ground
+    );
+    
+    // Add Name component to identify the car
+    registry.emplace<Name>(carEntity, "car-sedan");
+    
+    // Set appropriate scale for the car
+    if (registry.all_of<Transform>(carEntity)) {
+        auto& transform = registry.get<Transform>(carEntity);
+        transform.scale = Vector3{1.0F, 1.0F, 1.0F};  // Use 1:1 scale
+        std::cout << "Car scale set to: (" << transform.scale.x << ", " 
+                  << transform.scale.y << ", " << transform.scale.z << ")" << std::endl;
+    }
+    
+    // Debug: Print model info
+    std::cout << "Car entity created with " << carModel.meshCount << " meshes" << std::endl;
+    std::cout << "Car entity created with " << carModel.materialCount << " materials" << std::endl;
 }
 
 entt::entity BulletPhysicsScene::createPhysicsEntity(
