@@ -1,7 +1,10 @@
 #include <raylib.h>
 #include <raymath.h>
-#include <project/scene.hpp>
+#include <project/scene_manager.hpp>
+#include <project/tree_scene.hpp>
+#include <project/geometric_scene.hpp>
 #include <iostream>
+#include <memory>
 
 namespace {
     constexpr int kWindowWidth = 800;
@@ -14,17 +17,15 @@ namespace {
     constexpr float kCameraPositionZ = 2.0F;
     constexpr float kCameraFovy = 45.0F;
     constexpr int kTargetFPS = 60;
-    constexpr float kModelScale = 2.0F;
     constexpr int kGridSlices = 10;
     constexpr float kGridSpacing = 1.0F;
-    constexpr float kTestCubePosX = 2.0F;
-    constexpr float kTestCubeSize = 0.5F;
     constexpr int kFpsPosX = 10;
     constexpr int kFpsPosY = 10;
     constexpr int kTextPosX = 10;
     constexpr int kTextPosY = 40;
     constexpr int kTextFontSize = 20;
     constexpr int kTextLineSpacing = 30;
+    constexpr int kKeySwitchScene = KEY_TAB;
 
     Camera3D createCamera() {
         Camera3D camera{};
@@ -36,12 +37,20 @@ namespace {
         return camera;
     }
 
-    void runGameLoop(Camera3D& camera, project::Scene& scene) {
+    void runGameLoop(Camera3D& camera, project::SceneManager& sceneManager) {
         SetTargetFPS(kTargetFPS);
         
         while (!WindowShouldClose()) {
+            // Handle keyboard input for scene switching
+            if (IsKeyPressed(kKeySwitchScene)) {
+                sceneManager.switchToNextScene();
+            }
+            
             // Update camera
             UpdateCamera(&camera, CAMERA_ORBITAL);
+            
+            // Update current scene
+            sceneManager.update();
             
             // Draw
             BeginDrawing();
@@ -49,12 +58,8 @@ namespace {
             
             BeginMode3D(camera);
             
-            // Draw a test cube to verify 3D rendering works (offset to the side)
-            DrawCube(Vector3{ kTestCubePosX, 0.0F, 0.0F }, kTestCubeSize, kTestCubeSize, kTestCubeSize, RED);
-            DrawCubeWires(Vector3{ kTestCubePosX, 0.0F, 0.0F }, kTestCubeSize, kTestCubeSize, kTestCubeSize, MAROON);
-            
-            // Draw the entire scene (all objects)
-            scene.draw();
+            // Draw the current scene
+            sceneManager.draw();
             
             // Draw a grid for reference
             DrawGrid(kGridSlices, kGridSpacing);
@@ -68,9 +73,18 @@ namespace {
             
             // Draw UI
             DrawFPS(kFpsPosX, kFpsPosY);
+            
+            const auto* currentScene = sceneManager.getCurrentScene();
+            const std::string sceneName = (currentScene != nullptr) ? currentScene->getName() : "No Scene";
+            const size_t currentIndex = sceneManager.getCurrentSceneIndex();
+            const size_t sceneCount = sceneManager.getSceneCount();
+            const std::string sceneInfo = "Scene: " + sceneName + " (" + 
+                                         std::to_string(currentIndex + 1) + 
+                                         "/" + std::to_string(sceneCount) + ")";
+            
             DrawText("3D Scene Example - Use mouse to orbit camera", kTextPosX, kTextPosY, kTextFontSize, DARKGRAY);
-            DrawText(("Objects in scene: " + std::to_string(scene.getObjectCount())).c_str(), 
-                     kTextPosX, kTextPosY + kTextLineSpacing, kTextFontSize, DARKGRAY);
+            DrawText(sceneInfo.c_str(), kTextPosX, kTextPosY + kTextLineSpacing, kTextFontSize, DARKGRAY);
+            DrawText(("Press TAB to switch scenes"), kTextPosX, kTextPosY + (kTextLineSpacing * 2), kTextFontSize, DARKGRAY);
             
             EndDrawing();
         }
@@ -85,53 +99,33 @@ int main() {
         return 1;
     }
     
-    // Check if model file exists
-    if (!FileExists(kModelPath)) {
-        std::cerr << "Model file not found: " << kModelPath << '\n';
-        CloseWindow();
-        return 1;
-    }
-    
     // Set up 3D camera
     Camera3D camera = createCamera();
     
-    // Create a scene to manage multiple objects
-    project::Scene scene;
+    // Create scene manager to handle multiple scenes (Strategy pattern)
+    project::SceneManager sceneManager;
     
-    // Load the 3D model
-    std::cout << "Loading model: " << kModelPath << '\n';
-    Model model = LoadModel(kModelPath);
-    
-    if (!IsModelValid(model)) {
-        std::cerr << "Failed to load model: " << kModelPath << '\n';
-        std::cerr << "Model mesh count: " << model.meshCount << '\n';
-        CloseWindow();
-        return 1;
+    // Register the tree scene (original scene)
+    if (FileExists(kModelPath)) {
+        auto treeScene = std::make_unique<project::TreeScene>(kModelPath);
+        sceneManager.registerScene(std::move(treeScene));
+        std::cout << "Registered Tree Scene\n";
+    } else {
+        std::cerr << "Warning: Model file not found: " << kModelPath << '\n';
+        std::cerr << "Tree Scene will not be available\n";
     }
     
-    std::cout << "Model loaded successfully!\n";
-    std::cout << "Mesh count: " << model.meshCount << '\n';
-    std::cout << "Material count: " << model.materialCount << '\n';
+    // Register the geometric scene (new scene)
+    auto geometricScene = std::make_unique<project::GeometricScene>();
+    sceneManager.registerScene(std::move(geometricScene));
+    std::cout << "Registered Geometric Scene\n";
     
-    // Get model bounding box to understand its size
-    BoundingBox bounds = GetModelBoundingBox(model);
-    std::cout << "Model bounds - Min: (" << bounds.min.x << ", " << bounds.min.y << ", " << bounds.min.z << ")\n";
-    std::cout << "Model bounds - Max: (" << bounds.max.x << ", " << bounds.max.y << ", " << bounds.max.z << ")\n";
+    std::cout << "Total scenes registered: " << sceneManager.getSceneCount() << '\n';
+    std::cout << "Press TAB to switch between scenes\n";
     
-    // Add the model to the scene at the origin
-    const size_t objectIndex = scene.addObject(model, Vector3{0.0F, 0.0F, 0.0F}, kModelScale, "tree-main");
-    (void)objectIndex;  // Suppress unused variable warning
+    runGameLoop(camera, sceneManager);
     
-    // Example: Add multiple instances of the same model at different positions
-    // (Note: In a real scenario, you'd want to load the model multiple times or use instancing)
-    // For now, we'll just add one object. You can add more like this:
-    // scene.addObject(anotherModel, Vector3{2.0F, 0.0F, 0.0F}, 1.0F, "tree-2");
-    
-    std::cout << "Scene created with " << scene.getObjectCount() << " object(s)\n";
-    
-    runGameLoop(camera, scene);
-    
-    // Cleanup - Scene destructor will handle unloading models
+    // Cleanup
     CloseWindow();
     return 0;
 }
